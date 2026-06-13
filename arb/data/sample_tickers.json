@@ -1,0 +1,20 @@
+{
+  "binance": [
+    {"base": "SPCX", "quote": "USDT", "bid": 163.30, "ask": 163.44, "last": 163.37, "quote_volume": 2450000},
+    {"base": "BTC",  "quote": "USDT", "bid": 64010.5, "ask": 64011.2, "last": 64010.8, "quote_volume": 1850000000},
+    {"base": "ETH",  "quote": "USDT", "bid": 3401.20, "ask": 3401.55, "last": 3401.40, "quote_volume": 920000000},
+    {"base": "SOL",  "quote": "USDT", "bid": 142.10, "ask": 142.13, "last": 142.11, "quote_volume": 410000000},
+    {"base": "PEPE", "quote": "USDT", "bid": 0.0000121, "ask": 0.0000122, "last": 0.00001215, "quote_volume": 88000000},
+    {"base": "ARB",  "quote": "USDT", "bid": 0.7421, "ask": 0.7425, "last": 0.7423, "quote_volume": 35000000},
+    {"base": "DOGE", "quote": "USDT", "bid": 0.12010, "ask": 0.12014, "last": 0.12012, "quote_volume": 210000000}
+  ],
+  "gate": [
+    {"base": "SPCX", "quote": "USDT", "bid": 161.20, "ask": 161.34, "last": 161.27, "quote_volume": 540000},
+    {"base": "BTC",  "quote": "USDT", "bid": 64008.0, "ask": 64009.0, "last": 64008.5, "quote_volume": 96000000},
+    {"base": "ETH",  "quote": "USDT", "bid": 3399.80, "ask": 3400.10, "last": 3399.95, "quote_volume": 41000000},
+    {"base": "SOL",  "quote": "USDT", "bid": 142.55, "ask": 142.60, "last": 142.57, "quote_volume": 18000000},
+    {"base": "PEPE", "quote": "USDT", "bid": 0.00001235, "ask": 0.00001242, "last": 0.00001238, "quote_volume": 6200000},
+    {"base": "ARB",  "quote": "USDT", "bid": 0.7405, "ask": 0.7409, "last": 0.7407, "quote_volume": 2400000},
+    {"base": "DOGE", "quote": "USDT", "bid": 0.12005, "ask": 0.12009, "last": 0.12007, "quote_volume": 14000000}
+  ]
+}
