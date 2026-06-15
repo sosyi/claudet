@@ -32,7 +32,32 @@ python -m arb --min-net-spread 0.5 --min-volume 1000000
 
 # Live dashboard, refresh every 10 seconds (Ctrl-C to stop):
 python -m arb --watch 10 --min-net-spread 0.3
+
+# Depth-aware profit analysis + markdown report (how much can you ACTUALLY make):
+python -m arb --analyze --capital 10000 --report REPORT.md
+python -m arb --demo --analyze --min-net-spread -5    # offline preview
 ```
+
+## Depth-aware profit analysis (the real "profit space")
+
+Top-of-book spread only tells you a gap *exists*. The money question is **how
+much capital you can deploy before slippage closes the gap**. With `--analyze`
+the tool fetches L2 order-book depth for the top candidates and simulates
+walking both books at once — buying into progressively pricier asks while
+selling into progressively cheaper bids — until the marginal unit no longer
+clears fees. It reports, per market:
+
+- **预算内净利润 / 净%** — realized net profit at your `--capital`, after slippage and both-leg fees.
+- **可吃下资金** — the maximum capital the gap can absorb before it stops paying.
+- **资金上限净利润** — the depth-limited best-case profit for one execution.
+- **状态** — `受资金限制` (more capital would earn more), `受深度限制` (gap exhausted), or `扣费后不盈利` (a phantom gap fees eat).
+
+This is the difference between a price gap that *looks* tradable and one that
+*is*. See [`REPORT.md`](./REPORT.md) for a full generated example.
+
+Analysis options: `--capital N` (budget per trade), `--analyze-top N` (how many
+candidates to deep-analyze), `--depth-limit N` (book levels to fetch),
+`--cycles-per-day N` (for the daily-profit sketch), `--report FILE`.
 
 ### Example output (`--demo`)
 
@@ -83,11 +108,19 @@ or `--binance-fee 0.00075` with BNB) — fee assumptions change which rows clear
 ```
 arb/
   exchanges.py   # Public-REST clients for Binance & Gate, normalized to (BASE, QUOTE) keys
-  core.py        # Fee model + opportunity finder (both directions, sorted by net spread)
-  cli.py         # argparse CLI: table/json/csv output, filters, --watch loop, --demo
-  data/sample_tickers.json   # Offline fixture used by --demo and tests
-tests/test_core.py           # Unit tests for the matching & spread math
+  core.py        # Fee model + top-of-book opportunity finder (both directions)
+  depth.py       # L2 order-book fetch + book-matching execution simulation (slippage)
+  analyze.py     # Depth-aware profit analysis: realized profit, max usable capital
+  report.py      # Renders the markdown profitability report
+  cli.py         # argparse CLI: scan, --watch loop, --analyze/--report, --demo
+  data/sample_tickers.json      # Offline ticker fixture (--demo scan)
+  data/sample_orderbooks.json   # Offline L2 depth fixture (--demo analyze)
+tests/test_core.py    # Matching & spread math
+tests/test_depth.py   # Book-matching simulation & profit analysis
 ```
+
+Two-stage analysis keeps it efficient: a cheap top-of-book scan of *all* markets
+picks candidates, then depth is fetched only for the top N worth deep-analyzing.
 
 - **Symbol matching** normalizes Binance `BTCUSDT` (split via `exchangeInfo`)
   and Gate `BTC_USDT` to a common `(BASE, QUOTE)` key, so only genuinely

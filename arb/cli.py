@@ -30,10 +30,19 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List
 
+from .analyze import ProfitAnalysis, analyze_opportunity
 from .core import Fees, Opportunity, find_opportunities
+from .depth import (
+    OrderBook,
+    fetch_binance_book,
+    fetch_gate_book,
+    load_books_from_fixture,
+)
 from .exchanges import BinanceClient, FetchError, GateClient, Symbol, Ticker, load_from_fixture
+from .report import build_report
 
 _FIXTURE = os.path.join(os.path.dirname(__file__), "data", "sample_tickers.json")
+_BOOK_FIXTURE = os.path.join(os.path.dirname(__file__), "data", "sample_orderbooks.json")
 
 
 def _gather_books(timeout: float) -> Dict[str, Dict[Symbol, Ticker]]:
@@ -117,11 +126,104 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Refresh every N seconds instead of running once (Ctrl-C to stop).")
     p.add_argument("--demo", action="store_true",
                    help="Use bundled sample data instead of the network (for testing/offline).")
+
+    g = p.add_argument_group("profit analysis (depth-aware)")
+    g.add_argument("--analyze", action="store_true",
+                   help="Fetch order-book depth for top candidates and analyze realized profit after slippage.")
+    g.add_argument("--capital", type=float, default=10000.0,
+                   help="Capital budget per trade in quote currency for analysis (default 10000).")
+    g.add_argument("--depth-limit", type=int, default=100,
+                   help="Order-book levels to fetch per market when analyzing (default 100).")
+    g.add_argument("--analyze-top", type=int, default=15,
+                   help="Number of top candidates to deep-analyze with depth (default 15).")
+    g.add_argument("--cycles-per-day", type=int, default=20,
+                   help="Assumed executions/day for the daily-profit sketch (default 20).")
+    g.add_argument("--report", default=None,
+                   help="Write the markdown profit report to this file (implies --analyze).")
     return p
+
+
+def _fetch_book(exchange: str, base: str, quote: str, limit: int, timeout: float) -> OrderBook:
+    if exchange == "binance":
+        return fetch_binance_book(base, quote, limit=limit, timeout=timeout)
+    return fetch_gate_book(base, quote, limit=limit, timeout=timeout)
+
+
+def _run_analysis(args, opps: List[Opportunity]) -> List[ProfitAnalysis]:
+    """Pull depth for the top candidates and compute depth-aware profit."""
+    fees = Fees(binance=args.binance_fee, gate=args.gate_fee)
+    candidates = opps[: args.analyze_top]
+    analyses: List[ProfitAnalysis] = []
+
+    if args.demo:
+        books = load_books_from_fixture(_BOOK_FIXTURE)
+        for o in candidates:
+            buy_book = books.get(o.buy_exchange, {}).get((o.base, o.quote))
+            sell_book = books.get(o.sell_exchange, {}).get((o.base, o.quote))
+            if buy_book and sell_book:
+                analyses.append(analyze_opportunity(o, buy_book, sell_book, fees, args.capital))
+        return analyses
+
+    # Live: fetch the two books for each candidate in parallel.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        jobs = []
+        for o in candidates:
+            fb = pool.submit(_fetch_book, o.buy_exchange, o.base, o.quote, args.depth_limit, args.timeout)
+            fs = pool.submit(_fetch_book, o.sell_exchange, o.base, o.quote, args.depth_limit, args.timeout)
+            jobs.append((o, fb, fs))
+        for o, fb, fs in jobs:
+            try:
+                buy_book, sell_book = fb.result(), fs.result()
+            except FetchError as exc:
+                print(f"warn: skipping {o.symbol_label}: {exc}", file=sys.stderr)
+                continue
+            analyses.append(analyze_opportunity(o, buy_book, sell_book, fees, args.capital))
+    return analyses
+
+
+def _run_analyze_and_report(args) -> int:
+    fees = Fees(binance=args.binance_fee, gate=args.gate_fee)
+    try:
+        books = load_from_fixture(_FIXTURE) if args.demo else _gather_books(args.timeout)
+    except FetchError as exc:
+        msg = str(exc).lower()
+        print(f"error: {exc}", file=sys.stderr)
+        if any(s in msg for s in ("not in allowlist", "reach", "forbidden", "http 403", "http 451")):
+            print("hint: this environment may block exchange APIs. Allow api.binance.com and "
+                  "api.gateio.ws in your network egress settings, or run with --demo.", file=sys.stderr)
+        return 2
+
+    # Stage 1: cheap top-of-book scan to pick candidates worth deep-analyzing.
+    opps = find_opportunities(
+        books["binance"], books["gate"], "binance", "gate", fees,
+        min_net_spread_pct=args.min_net_spread, min_quote_volume=args.min_volume,
+        quote_filter=args.quote,
+    )
+    if not opps:
+        print("No candidate markets cleared the top-of-book filters; nothing to analyze.", file=sys.stderr)
+        return 0
+
+    # Stage 2: depth-aware profit analysis on the top candidates.
+    analyses = _run_analysis(args, opps)
+    if not analyses:
+        print("Could not retrieve order-book depth for any candidate.", file=sys.stderr)
+        return 2
+
+    data_source = "内置样例盘口 (--demo)" if args.demo else "Binance + Gate.io 实时盘口"
+    report = build_report(analyses, fees, args.capital, args.cycles_per_day, data_source)
+    print(report)
+    if args.report:
+        with open(args.report, "w", encoding="utf-8") as fh:
+            fh.write(report + "\n")
+        print(f"\n[报告已写入 {args.report}]", file=sys.stderr)
+    return 0
 
 
 def main(argv: List[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    if args.analyze or args.report:
+        return _run_analyze_and_report(args)
 
     def scan_and_print() -> int:
         try:
